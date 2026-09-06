@@ -125,8 +125,15 @@ public class Storage
     }
   }
 
-  /// <summary>Saves a single player's data and returns an awaitable Task.</summary>
-  public async Task SaveAsync(ulong steamid)
+  /// <summary>
+  /// Saves a single player's data and returns an awaitable Task.
+  ///
+  /// <para>Routed through <see cref="SaveOneAsync"/> for its try/catch. Every user-visible write -
+  /// skybox, brightness, tint - reaches this as a discarded task, so an exception here used to
+  /// become an unobserved Task exception and vanish: a save that never happened looked exactly
+  /// like a save that did, and "it won't keep my choice" could not be answered from the console.</para>
+  /// </summary>
+  public Task SaveAsync(ulong steamid)
   {
     SkyData? data;
     lock (_storageLock)
@@ -134,10 +141,7 @@ public class Storage
       _playerStorage.TryGetValue(steamid, out data);
     }
 
-    if (data == null) return;
-
-    using MySqlConnection connection = await ConnectAsync();
-    await connection.ExecuteAsync(string.Format(UpsertQuery, Table), data);
+    return data == null ? Task.CompletedTask : SaveOneAsync(data);
   }
 
   private async Task SaveOneAsync(SkyData data)

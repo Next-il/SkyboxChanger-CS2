@@ -3,3 +3,6 @@ kvlib/.vscode/
 kvlib/.xmake/
 kvlib/build/
 /build
+.DS_Store
+.claude/
+lib/

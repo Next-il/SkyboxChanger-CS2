@@ -13,6 +13,7 @@ using CounterStrikeSharp.API.Modules.UserMessages;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
 using MenuManager;
+using PanoramaManager;
 
 namespace SkyboxChanger;
 
@@ -30,9 +31,12 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
 
   public required SpectatorSkyboxManager SpectatorManager { get; set; }
 
-  // MenuManager capability
+  // MenuManager capability. Optional now: the Panorama panel is the primary UI and these menus
+  // are the fallback for a server without the Panorama natives.
   private IMenuApi? _menuApi;
   private readonly PluginCapability<IMenuApi?> _menuCapability = new("menu:nfcore");
+
+  private SkyboxPanel? _skyboxPanel;
 
   private static SkyboxChanger? _Instance { get; set; }
 
@@ -47,6 +51,9 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
     _Instance = this;
 
     SpectatorManager = new SpectatorSkyboxManager(this);
+
+    // Once, here - not from Initialize, which runs on every map start.
+    SpectatorManager.RegisterGameEvents();
 
     RegisterListener<Listeners.OnServerPrecacheResources>(OnServerPrecacheResources);
     RegisterListener<Listeners.CheckTransmit>(OnCheckTransmit);
@@ -144,7 +151,6 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
     RegisterEventHandler<EventPlayerConnectFull>((@event, info) =>
     {
       var slot = @event.Userid!.Slot;
-      var player = @event.Userid!;
       Server.NextFrame(() =>
       {
         foreach (var sky in Utilities.FindAllEntitiesByDesignerName<CEnvSky>("env_sky"))
@@ -155,15 +161,7 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
             EnvManager.SpawnedSkyboxes.Remove(slot);
           }
         }
-        if (player.AuthorizedSteamID != null)
-        {
-          Service?.InvalidateCache(player.AuthorizedSteamID.SteamId64);
-          _ = LoadPlayerSettingsOnConnectAndInitialize(player.AuthorizedSteamID.SteamId64, player);
-        }
-        else
-        {
-          EnvManager.InitializeSkyboxForPlayer(player);
-        }
+        LoadThenInitialize(slot);
       });
       return HookResult.Continue;
     });
@@ -172,6 +170,12 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
       EnvManager.OnPlayerLeave(slot);
       SpectatorManager.OnPlayerDisconnect(slot);
       var player = Utilities.GetPlayerFromSlot(slot);
+      if (player != null && player.IsValid)
+      {
+        // PanelHandle drops its own session on disconnect but raises no Close, so ours has to be
+        // dropped by hand or it survives for the life of the process.
+        _skyboxPanel?.Forget(player.SteamID);
+      }
       if (player != null && player.AuthorizedSteamID != null && Service != null)
       {
         Service.Save(player.AuthorizedSteamID.SteamId64);
@@ -183,30 +187,52 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
 
   public override void OnAllPluginsLoaded(bool hotReload)
   {
+    // Here and not in Load: plugin load order is undefined, so in Load MenuManager may not have
+    // registered its capability yet.
     _menuApi = _menuCapability.Get();
 
     if (_menuApi == null)
     {
-      Console.ForegroundColor = ConsoleColor.Red;
-      Console.WriteLine("[SkyboxChanger] CRITICAL ERROR: MenuManager API not found!");
-      Console.WriteLine("[SkyboxChanger] MenuManager is a required dependency for this plugin to function.");
-      Console.WriteLine("[SkyboxChanger] Please install MenuManagerCS2 from: https://github.com/NickFox007/MenuManagerCS2");
-      Console.WriteLine("[SkyboxChanger] Plugin will now unload automatically.");
-      Console.ResetColor();
+      // A warning, not a fatal error. MenuManager used to be mandatory and its absence unloaded the
+      // plugin; the Panorama panel is the primary UI now, so the only thing missing is the fallback
+      // for servers that cannot run the panel.
+      Logger.LogWarning(
+        "[SkyboxChanger] MenuManager was not found. The Panorama panel still works; there is no chat-menu fallback for servers without the Panorama natives.");
+    }
 
-      Server.NextFrame(() =>
+    InitPanel();
+  }
+
+  /// <summary>
+  /// Brings up the Panorama card, once.
+  ///
+  /// <para>Panorama.Init is itself idempotent, but Spawn is not: a second Spawn creates a second
+  /// custom_hud_layout entity and orphans the first, which then holds input capture that nothing
+  /// still alive knows how to release. So the guard is on the handle rather than on Init.</para>
+  /// </summary>
+  private void InitPanel()
+  {
+    if (_skyboxPanel != null) return;
+
+    try
+    {
+      Panorama.Init(this);
+
+      _skyboxPanel = new SkyboxPanel(this);
+
+      if (!Panorama.CanReceiveClicks)
       {
-        try
-        {
-          Server.ExecuteCommand($"css_plugins unload {ModuleName}");
-        }
-        catch (Exception ex)
-        {
-          Console.WriteLine($"[SkyboxChanger] Error during auto-unload: {ex.Message}");
-        }
-      });
+        Console.WriteLine("[SkyboxChanger] Panorama has no click channel - the panel will render but not respond. Run css_panorama_diag.");
+      }
+    }
+    catch (Exception ex)
+    {
+      // A panel that cannot spawn must not take the plugin down with it. The skyboxes still apply
+      // on connect and SkyboxCommand already falls back to the chat menu on its own.
+      Console.WriteLine($"[SkyboxChanger] Failed to start the Panorama panel: {ex.Message}");
 
-      return;
+      _skyboxPanel?.Dispose();
+      _skyboxPanel = null;
     }
   }
 
@@ -224,6 +250,10 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
         _menuApi.CloseMenu(player);
       }
     }
+
+    _skyboxPanel?.Dispose();
+    _skyboxPanel = null;
+    Panorama.Shutdown();
 
     SpectatorManager.Shutdown();
     Service.Save();
@@ -246,6 +276,50 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
   {
     Config = config;
     Service = new Service(this, Config.Database.Host, Config.Database.Port, Config.Database.User, Config.Database.Password, Config.Database.Database, Config.Database.TablePrefix);
+  }
+
+  /// <summary>
+  /// Loads the player's saved row, then spawns their sky - waiting for Steam validation if it has
+  /// not landed yet.
+  ///
+  /// <para>The old code initialized immediately whenever AuthorizedSteamID was still null and never
+  /// came back to it. That is not harmless for a RECONNECT: OnClientDisconnect drops the player's
+  /// cached row, so the fall-through read an empty cache, minted a default and gave them the map's
+  /// own sky for the rest of the map with nothing that would ever retry. AuthorizedSteamID stays
+  /// null until SteamAPI validation completes, which player_connect_full does not guarantee.</para>
+  ///
+  /// <para>Re-resolved from the slot on each retry rather than holding the controller, so a player
+  /// who left mid-wait cannot have their load applied to whoever took the slot: the load is keyed
+  /// off the steamid of whoever is in it now.</para>
+  /// </summary>
+  private void LoadThenInitialize(int slot, int attempt = 0)
+  {
+    if (Utilities.GetPlayerFromSlot(slot) is not { IsValid: true } player) return;
+
+    // Bots never authorize, so waiting on them is ten seconds of retries and a warning per bot.
+    if (player.IsBot)
+    {
+      EnvManager.InitializeSkyboxForPlayer(player);
+      return;
+    }
+
+    if (player.AuthorizedSteamID is { } authorized)
+    {
+      Service?.InvalidateCache(authorized.SteamId64);
+      _ = LoadPlayerSettingsOnConnectAndInitialize(authorized.SteamId64, player);
+      return;
+    }
+
+    // ~10s of retries, then give them a sky rather than none at all.
+    if (attempt >= 20)
+    {
+      Logger.LogWarning(
+        "[SkyboxChanger] slot {Slot} never authorized; applying the map default without a load", slot);
+      EnvManager.InitializeSkyboxForPlayer(player);
+      return;
+    }
+
+    AddTimer(0.5f, () => LoadThenInitialize(slot, attempt + 1));
   }
 
   private async Task LoadPlayerSettingsOnConnectAndInitialize(ulong steamId64, CCSPlayerController player)
@@ -284,12 +358,6 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
   [CommandHelper(0, "Change skybox", CommandUsage.CLIENT_ONLY)]
   public unsafe void SkyboxCommand(CCSPlayerController player, CommandInfo info)
   {
-    if (_menuApi == null)
-    {
-      player.PrintToChat($"{Localizer["prefix"]} {Localizer["menu.error"]}");
-      return;
-    }
-
     if (Config.MenuPermission != "" && Config.MenuPermission != null && !AdminManager.PlayerHasPermissions(player, [Config.MenuPermission]))
     {
       player.PrintToChat($"{Localizer["prefix"]} {Localizer["no.permission"]}");
@@ -299,6 +367,17 @@ public class SkyboxChanger : BasePlugin, IPluginConfig<SkyboxConfig>
     if (SpectatorManager.IsPlayerInSpectatorMode(player.Slot))
     {
       player.PrintToChat($"{Localizer["prefix"]} {Localizer["need.alive"]}");
+      return;
+    }
+
+    // The panel first, the chat menus as the fallback. Open returns false when the player cannot be
+    // shown a card at all - no per-player text natives, or the render threw - which is exactly the
+    // case where the old menus are still the better answer.
+    if (_skyboxPanel?.Open(player) == true) return;
+
+    if (_menuApi == null)
+    {
+      player.PrintToChat($"{Localizer["prefix"]} {Localizer["menu.error"]}");
       return;
     }
 

@@ -17,13 +17,21 @@ public class SpectatorSkyboxManager
         _plugin = plugin;
     }
 
+    /// <summary>Starts the per-map polling timer. Called from OnMapStart, so it must NOT register
+    /// event handlers - see <see cref="RegisterGameEvents"/>.</summary>
     public void Initialize()
     {
         _updateTimer = _plugin.AddTimer(0.5f, CheckSpectatorUpdates, TimerFlags.REPEAT);
-        RegisterGameEvents();
     }
 
-    private void RegisterGameEvents()
+    /// <summary>
+    /// Hooks the four events this manager reacts to. Called once, from the plugin's Load.
+    ///
+    /// <para>It used to be called from Initialize, i.e. from OnMapStart. CSS does not dedupe
+    /// handlers, so after N maps every spawn, death, team change and connect ran
+    /// CheckSpectatorUpdates N times, each pass walking every player.</para>
+    /// </summary>
+    public void RegisterGameEvents()
     {
         _plugin.RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         _plugin.RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);

@@ -1,0 +1,396 @@
+/*
+    skybox_hud - the /sky and /skybox card. Shell (hud-screen, hud-root, hud-card, hud-head,
+    hud-foot, hidden, disabled) comes from hud_shared; everything here is prefixed sky-.
+
+    WIDTH ARITHMETIC. Panorama has no wrapping and no calc(), so every row is worked out by hand
+    and the numbers have to stay in sync with SkyboxPanel.cs:
+
+        root                758
+        sky-body padding    14 each side      -> 730 usable
+        sky-block padding   12 each side      -> 706 usable inside a block
+
+        skybox grid   3 per line:  3*236 + 2*11 = 730     (the grid is not in a block)
+        brightness    5 per line:  5*134 + 4*9  = 706
+        tint          6 per line:  6*111 + 5*8  = 706
+        tabs          3 * 140, and the underline travels exactly one tab width
+
+    WHY THE CELL IS 236 WIDE. Widths are border-box here, so a cell is 236 - 2 border - 16 padding
+    = 218 of content, of which the selection dot takes 14, leaving 204 for the name. Stratum2 Mono
+    at 10px runs about 6px a character, so that is roughly 34 characters before the ellipsis -
+    enough for cs_italy_s2_skybox_2_lightning (30) with slack. Four columns would give 175px cells
+    and clip most of the stock config. Anything longer than ~34 characters DOES ellipsize; that is
+    accepted rather than solved, because the alternative is two columns and half a wasted card.
+
+    The trailing margin-right on the last item in a row is zeroed with :last-child rather than left
+    to fall outside the content box, so the three arithmetic sums above are exact.
+
+    Accent is blue (#56a0dd, hud_shared's accent-blue) so this card is not mistaken for the gold
+    weapon selector, the cyan admin panel or the purple music picker at a glance.
+*/
+
+.sky-root {
+    width: 758px;
+}
+
+/* Scoped to this panel: hud_shared is shared with every other layout and its own header is fine
+   as it is - this one only wants the two muted lines a shade brighter. */
+.sky-root .hud-tag  { color: #9aa3ad; }
+.sky-root .hud-hint { color: #9aa3ad; }
+
+/* ------------------------------------------------------------------ tabs */
+
+.sky-tabs {
+    flow-children: right;
+    width: 100%;
+    height: 38px;
+    padding: 0px 14px;
+    border-bottom: 1px solid #ffffff0f;
+}
+
+/*
+    Fixed width, not padding-to-fit. The underline below travels by whole tab widths, so a tab has
+    to be a known size - sized by its label, the distance would depend on the words, and the words
+    are localised.
+*/
+.sky-tab {
+    width: 140px;
+    height: 38px;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+    transition-timing-function: ease-in-out;
+}
+.sky-tab:hover { background-color: #ffffff0a; }
+
+.sky-tab-lbl {
+    width: 100%;
+    font-family: Stratum2 Medium Condensed;
+    font-size: 13px;
+    color: #aab2bc;
+    text-transform: uppercase;
+    letter-spacing: 1.1px;
+    text-align: center;
+    vertical-align: center;
+}
+.sky-tab.active .sky-tab-lbl { color: #ffffff; }
+
+/*
+    ONE underline for the whole bar, slid into place, instead of a border appearing on each tab.
+    ignore-parent-flow keeps it out of the row's left-to-right flow so it can sit beneath the tabs
+    rather than after them.
+
+    position is 0px, NOT the row's 14px padding: ignore-parent-flow positions against the parent's
+    content box, which already starts after that padding.
+
+    A transform on the base rule as well, so the element is never left without one while the class
+    is being swapped - that is what makes it snap rather than slide.
+*/
+.sky-tab-bar {
+    ignore-parent-flow: true;
+    position: 0px 36px 0px;
+    width: 140px;
+    height: 2px;
+    background-color: #56a0dd;
+    transform: translateX(0px);
+    transition-property: transform;
+    transition-duration: 0.18s;
+    transition-timing-function: ease-in-out;
+}
+.sky-tab-bar.at-0 { transform: translateX(0px); }
+.sky-tab-bar.at-1 { transform: translateX(140px); }
+.sky-tab-bar.at-2 { transform: translateX(280px); }
+
+/* ------------------------------------------------------------------ body */
+
+/*
+    min-height is a floor, not a fixed height. The card is sized by its content and Panorama cannot
+    animate a height it works out per view, so the jump between the tall SKYBOX tab and the short
+    BRIGHTNESS one is removed rather than eased. 330 is roughly the full grid's height.
+*/
+.sky-body {
+    flow-children: down;
+    width: 100%;
+    padding: 14px;
+    min-height: 330px;
+    max-height: 560px;
+    overflow: squish scroll;
+}
+
+.sky-view {
+    flow-children: down;
+    width: 100%;
+}
+
+.sky-sub {
+    width: 100%;
+    font-family: Stratum2 Mono;
+    font-size: 10px;
+    color: #9aa3ad;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+/* --------------------------------------------------------- the skybox grid */
+
+.sky-grid {
+    flow-children: down;
+    width: 100%;
+}
+
+.sky-gridrow {
+    flow-children: right;
+    width: 100%;
+}
+
+.sky-cell {
+    width: 236px;
+    height: 34px;
+    flow-children: right;
+    padding: 0px 8px;
+    margin: 0px 11px 8px 0px;
+    border: 1px solid #ffffff14;
+    background-color: #ffffff0a;
+    overflow: squish clip;
+    transition-property: background-color, border-color;
+    transition-duration: 0.1s;
+    transition-timing-function: ease-in-out;
+}
+/* The trailing gutter would otherwise sit inside the row and shift everything left. */
+.sky-cell:last-child { margin-right: 0px; }
+
+.sky-cell:hover {
+    background-color: #ffffff16;
+    border-color: #56a0dd66;
+}
+.sky-cell.selected {
+    border-color: #56a0dd;
+    background-color: #56a0dd26;
+}
+
+/*
+    A filled dot rather than a tick glyph: the cell already carries a long name, and a mark that is
+    always in the same place reads faster down a column than one that moves with the text. It is
+    transparent when unselected rather than collapsed, so nothing shifts when the selection moves.
+*/
+.sky-cell-dot {
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    background-color: #ffffff1f;
+    vertical-align: center;
+}
+.sky-cell.selected .sky-cell-dot { background-color: #56a0dd; }
+
+.sky-cell-lbl {
+    width: fill-parent-flow(1.0);
+    font-family: Stratum2 Mono;
+    font-size: 10px;
+    color: #c2c9d1;
+    text-overflow: ellipsis;
+    vertical-align: center;
+}
+.sky-cell.selected .sky-cell-lbl { color: #ffffff; }
+
+.sky-empty {
+    width: 100%;
+    font-family: Stratum2 Regular;
+    font-size: 11px;
+    color: #929ba5;
+    margin-top: 4px;
+}
+
+/* ----------------------------------------------------------------- pager */
+
+/*
+    Collapsed until the plugin puts has-pages on the root. A single-page list has no second page to
+    reach, and a pair of arrows that do nothing is worse than no arrows. The stock config is 17
+    entries plus the injected Default, which is exactly one page, so most servers never see this.
+*/
+.sky-pager {
+    flow-children: right;
+    visibility: collapse;
+    width: 100%;
+    horizontal-align: center;
+    margin-top: 6px;
+}
+.sky-root.has-pages .sky-pager { visibility: visible; }
+
+.sky-pg {
+    width: 28px;
+    height: 24px;
+    background-color: #ffffff0a;
+    border: 1px solid #ffffff14;
+    transition-property: background-color;
+    transition-duration: 0.1s;
+    transition-timing-function: ease-in-out;
+}
+.sky-pg:hover { background-color: #ffffff1a; }
+
+.sky-pg-lbl {
+    width: 100%;
+    font-size: 9px;
+    color: #9aa2ac;
+    text-align: center;
+    vertical-align: center;
+}
+
+.sky-pg-txt {
+    width: 110px;
+    font-family: Stratum2 Mono;
+    font-size: 10px;
+    color: #9aa3ad;
+    text-transform: uppercase;
+    text-align: center;
+    vertical-align: center;
+}
+
+/* ----------------------------------------------------- blocks (both tabs) */
+
+.sky-block {
+    flow-children: down;
+    width: 100%;
+    padding: 12px;
+    background-color: #ffffff08;
+    border: 1px solid #ffffff12;
+}
+
+.sky-block-head {
+    flow-children: right;
+    width: 100%;
+    margin-bottom: 4px;
+}
+
+.sky-block-title {
+    width: fill-parent-flow(1.0);
+    font-family: Stratum2 Medium Condensed;
+    font-size: 14px;
+    color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 1.1px;
+    vertical-align: center;
+}
+
+/* The live readout - the current brightness, or the name of the current tint. */
+.sky-block-value {
+    font-family: Stratum2 Mono;
+    font-size: 12px;
+    color: #56a0dd;
+    text-transform: uppercase;
+    vertical-align: center;
+}
+
+.sky-block-desc {
+    width: 100%;
+    font-family: Stratum2 Regular;
+    font-size: 11px;
+    color: #98a1ab;
+    margin-bottom: 10px;
+}
+
+/* ------------------------------------------------------------ brightness */
+
+.sky-steprow {
+    flow-children: right;
+    width: 100%;
+}
+
+.sky-step {
+    width: 134px;
+    height: 34px;
+    margin-right: 9px;
+    border: 1px solid #ffffff14;
+    background-color: #ffffff0a;
+    transition-property: background-color, border-color;
+    transition-duration: 0.1s;
+    transition-timing-function: ease-in-out;
+}
+.sky-step:last-child { margin-right: 0px; }
+.sky-step:hover { background-color: #ffffff16; border-color: #56a0dd66; }
+
+.sky-step-lbl {
+    width: 100%;
+    font-family: Stratum2 Medium Condensed;
+    font-size: 12px;
+    color: #d4dae0;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    text-align: center;
+    vertical-align: center;
+}
+
+/* ------------------------------------------------------------------ tint */
+
+.sky-swatchrow {
+    flow-children: right;
+    width: 100%;
+}
+
+.sky-swatch {
+    width: 111px;
+    height: 26px;
+    flow-children: right;
+    padding: 0px 7px;
+    margin: 0px 8px 8px 0px;
+    border: 1px solid #ffffff14;
+    background-color: #ffffff0a;
+    overflow: squish clip;
+    transition-property: background-color, border-color;
+    transition-duration: 0.1s;
+    transition-timing-function: ease-in-out;
+}
+.sky-swatch:last-child { margin-right: 0px; }
+.sky-swatch:hover { background-color: #ffffff16; border-color: #56a0dd66; }
+.sky-swatch.selected { border-color: #56a0dd; background-color: #56a0dd26; }
+
+.sky-swatch-chip {
+    width: 12px;
+    height: 12px;
+    margin-right: 7px;
+    border: 1px solid #00000066;
+    vertical-align: center;
+}
+
+.sky-swatch-lbl {
+    width: fill-parent-flow(1.0);
+    font-family: Stratum2 Mono;
+    font-size: 9px;
+    color: #c2c9d1;
+    text-transform: uppercase;
+    text-overflow: ellipsis;
+    vertical-align: center;
+}
+.sky-swatch.selected .sky-swatch-lbl { color: #ffffff; }
+
+/*
+    The chip colours. The server CANNOT send a colour, so every swatch is a static class on the
+    button and the paint lives here - which is also why the plugin's id -> KnownColor table and this
+    block have to name the same 24 colours. Values are System.Drawing's, so the chip is exactly the
+    tint that gets applied.
+
+    NOTE THE DESCENDANT SELECTOR: the class is on the swatch BUTTON, because that is the id the
+    plugin knows, and painting the button itself would flood the whole pill instead of the chip.
+*/
+.tint-white    .sky-swatch-chip { background-color: #ffffff; }
+.tint-silver   .sky-swatch-chip { background-color: #c0c0c0; }
+.tint-gray     .sky-swatch-chip { background-color: #808080; }
+.tint-black    .sky-swatch-chip { background-color: #000000; }
+.tint-maroon   .sky-swatch-chip { background-color: #800000; }
+.tint-red      .sky-swatch-chip { background-color: #ff0000; }
+.tint-crimson  .sky-swatch-chip { background-color: #dc143c; }
+.tint-pink     .sky-swatch-chip { background-color: #ffc0cb; }
+.tint-magenta  .sky-swatch-chip { background-color: #ff00ff; }
+.tint-purple   .sky-swatch-chip { background-color: #800080; }
+.tint-indigo   .sky-swatch-chip { background-color: #4b0082; }
+.tint-navy     .sky-swatch-chip { background-color: #000080; }
+.tint-blue     .sky-swatch-chip { background-color: #0000ff; }
+.tint-skyblue  .sky-swatch-chip { background-color: #87ceeb; }
+.tint-cyan     .sky-swatch-chip { background-color: #00ffff; }
+.tint-teal     .sky-swatch-chip { background-color: #008080; }
+.tint-seagreen .sky-swatch-chip { background-color: #2e8b57; }
+.tint-green    .sky-swatch-chip { background-color: #008000; }
+.tint-lime     .sky-swatch-chip { background-color: #00ff00; }
+.tint-yellow   .sky-swatch-chip { background-color: #ffff00; }
+.tint-gold     .sky-swatch-chip { background-color: #ffd700; }
+.tint-orange   .sky-swatch-chip { background-color: #ffa500; }
+.tint-brown    .sky-swatch-chip { background-color: #a52a2a; }
+.tint-tan      .sky-swatch-chip { background-color: #d2b48c; }

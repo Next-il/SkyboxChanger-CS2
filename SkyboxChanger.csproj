@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net10.0 and 1.0.373 are PanoramaManager's floor: the dll is built against that
+         API version and targets that runtime. -->
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>SkyboxChanger</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -14,10 +16,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.368">
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.373">
       <IncludeAssets>compile</IncludeAssets>
     </PackageReference>
     <Reference Include="MenuManagerApi"><HintPath>MenuManagerApi.dll</HintPath></Reference>
+
+    <!-- Copied next to the plugin (no Private=false): each CounterStrikeSharp plugin loads through
+         a context that probes its own folder, and each gets its own Panorama statics. A second copy
+         of a SHARED api dll next to the plugin is what breaks capability casts - this one is not
+         shared, so it belongs here. -->
+    <Reference Include="PanoramaManager">
+      <HintPath>lib\PanoramaManager.dll</HintPath>
+    </Reference>
     <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="MySQLConnector" Version="2.4.0" />
   </ItemGroup>

@@ -15,6 +15,19 @@ public class Service
     _storage = new Storage(host, port, user, password, database, tablePrefix);
   }
 
+  // ── Storage key ─────────────────────────────────────────────────────────────
+
+  /// <summary>
+  /// The id a player's row is cached and saved under.
+  ///
+  /// <para>AuthorizedSteamID first, because that is what the connect-time load and the disconnect
+  /// save use - reading the cache under player.SteamID instead meant that whenever the two differ
+  /// (SteamID is 0 until the controller is populated) a freshly loaded row was invisible and the
+  /// getter minted a default on top of it, which then read as "it didn't save".</para>
+  /// </summary>
+  private static ulong StorageKey(CCSPlayerController player)
+    => player.AuthorizedSteamID?.SteamId64 ?? player.SteamID;
+
   // ── Skybox ──────────────────────────────────────────────────────────────────
 
   public bool SetSkybox(CCSPlayerController player, string index)
@@ -24,14 +37,19 @@ public class Service
       return false;
     }
 
-    var skyData = _storage.GetPlayerSkydata(player.SteamID);
-    skyData.Skybox = index;
-
+    // Validate BEFORE touching the stored key. Assigning first meant a key that is no longer in
+    // config - the chat menu captures its keys when it is built, and "" (the map default) is
+    // removed from Config.Skyboxs on every map end - wrote that dead key into the cached row and
+    // then returned false without saving. The next Save, on disconnect or map end, wrote it over
+    // the player's real choice.
     if (!_plugin.Config.Skyboxs.TryGetValue(index, out var skybox))
     {
       _plugin.Logger.LogError("[SkyboxChanger] SetSkybox failed: skybox key '{Index}' not found in Config.Skyboxs (available keys: {Keys})", index, string.Join(", ", _plugin.Config.Skyboxs.Keys));
       return false;
     }
+
+    var skyData = _storage.GetPlayerSkydata(StorageKey(player));
+    skyData.Skybox = index;
 
     if (skybox.Brightness != null)
     {
@@ -54,7 +72,7 @@ public class Service
       }
     }
 
-    _ = _storage.SaveAsync(player.SteamID);
+    _ = _storage.SaveAsync(StorageKey(player));
     var result = _plugin.EnvManager.SetSkybox(player.Slot, skybox);
     if (!result)
     {
@@ -68,10 +86,10 @@ public class Service
     if (_plugin.SpectatorManager.IsPlayerInSpectatorMode(player.Slot))
       return;
 
-    var skyData = _storage.GetPlayerSkydata(player.SteamID);
+    var skyData = _storage.GetPlayerSkydata(StorageKey(player));
     skyData.Brightness = brightness;
     _plugin.EnvManager.SetBrightness(player.Slot, brightness);
-    _ = _storage.SaveAsync(player.SteamID);
+    _ = _storage.SaveAsync(StorageKey(player));
   }
 
   public void SetTintColor(CCSPlayerController player, Color color)
@@ -79,28 +97,36 @@ public class Service
     if (_plugin.SpectatorManager.IsPlayerInSpectatorMode(player.Slot))
       return;
 
-    var skyData = _storage.GetPlayerSkydata(player.SteamID);
+    var skyData = _storage.GetPlayerSkydata(StorageKey(player));
     skyData.Color = color.ToArgb();
     _plugin.EnvManager.SetTintColor(player.Slot, color);
-    _ = _storage.SaveAsync(player.SteamID);
+    _ = _storage.SaveAsync(StorageKey(player));
   }
 
   // ── Getters ─────────────────────────────────────────────────────────────────
 
   public Skybox? GetPlayerSkybox(CCSPlayerController player)
   {
-    var data = _storage.GetPlayerSkydata(player.SteamID);
+    var data = _storage.GetPlayerSkydata(StorageKey(player));
     return _plugin.Config.Skyboxs.GetValueOrDefault(data.Skybox);
+  }
+
+  /// <summary>The stored key rather than the resolved <see cref="Skybox"/>, which is what the
+  /// panel needs to mark the selected cell - two config entries can share a material, so the
+  /// object does not identify which one the player picked.</summary>
+  public string GetPlayerSkyboxKey(CCSPlayerController player)
+  {
+    return _storage.GetPlayerSkydata(StorageKey(player)).Skybox;
   }
 
   public float GetPlayerBrightness(CCSPlayerController player)
   {
-    return _storage.GetPlayerSkydata(player.SteamID).Brightness;
+    return _storage.GetPlayerSkydata(StorageKey(player)).Brightness;
   }
 
   public Color GetPlayerColor(CCSPlayerController player)
   {
-    return Color.FromArgb(_storage.GetPlayerSkydata(player.SteamID).Color);
+    return Color.FromArgb(_storage.GetPlayerSkydata(StorageKey(player)).Color);
   }
 
   public Skybox? GetMapDefaultSkybox(string map)
@@ -119,7 +145,7 @@ public class Service
     if (_plugin.SpectatorManager.IsPlayerInSpectatorMode(player.Slot))
       return;
 
-    var skyData = _storage.GetPlayerSkydata(player.SteamID);
+    var skyData = _storage.GetPlayerSkydata(StorageKey(player));
 
     if (!string.IsNullOrEmpty(skyData.Skybox) && _plugin.Config.Skyboxs.TryGetValue(skyData.Skybox, out var skybox))
     {

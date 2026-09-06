@@ -13,5 +13,16 @@
   "change.success": "{green}You have changed your skybox!",
   "change.failed": "{red}Failed to change the skybox.",
   "spectator.cannot_change": "{red}You cannot change your skybox while in spectator mode.",
-  "need.alive": "{red}You must be alive to use this command."
+  "need.alive": "{red}You must be alive to use this command.",
+  "panel.tab.skybox": "Skybox",
+  "panel.tab.brightness": "Brightness",
+  "panel.tab.tint": "Tint",
+  "panel.skyboxes": "skyboxes",
+  "panel.page": "Page",
+  "panel.footer": "Pick a skybox, then tune its brightness and tint - all three are yours alone",
+  "panel.empty": "No skyboxes are available to you on this server",
+  "panel.brightness.desc": "How bright your sky is. Everyone else keeps their own setting.",
+  "panel.tint.desc": "Tints your sky. WHITE is the neutral one - there is no separate clear.",
+  "panel.reset": "Reset",
+  "panel.tint.none": "None"
 }

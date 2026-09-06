@@ -114,18 +114,12 @@ public class Helper
     return true;
   }
 
-  /// <summary>Whether the player may actually wear this skybox, checking both the menu
-  /// permission and the skybox's own. Used on connect so a saved choice is not restored to
-  /// someone who has since lost the permission that earned it.</summary>
-  public static bool CanUseSkybox(CCSPlayerController player, Skybox skybox)
-  {
-    var config = SkyboxChanger.GetInstance().Config;
-    if (!string.IsNullOrEmpty(config.MenuPermission) && !AdminManager.PlayerHasPermissions(player, [config.MenuPermission]))
-    {
-      return false;
-    }
-    return PlayerHasPermission(player, skybox.Permissions, skybox.PermissionsOr);
-  }
+  // CanUseSkybox lived here and combined Config.MenuPermission with the skybox's own permissions.
+  // It is gone on purpose: its only caller was the connect-time restore, where the menu permission
+  // is both wrong (wearing a saved sky is not opening the menu) and racy - it is read one frame
+  // after player_connect_full, while CS2-SimpleAdmin is still re-adding its admins asynchronously,
+  // and a false answer there dropped the player's saved sky for the whole map. Gate the MENU in
+  // SkyboxCommand; gate the SKY with PlayerHasPermission.
 
   public static bool PlayerHasPermission(CCSPlayerController player, string[]? permissions, string[]? permissionsOr)
   {

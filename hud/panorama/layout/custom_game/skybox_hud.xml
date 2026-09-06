@@ -1,0 +1,351 @@
+<root>
+	<styles>
+		<include src="s2r://panorama/styles/custom_game/hud_shared.vcss_c" />
+		<include src="s2r://panorama/styles/custom_game/skybox_hud.vcss_c" />
+	</styles>
+
+	<!--
+		SkyboxChanger - the card behind /sky and /skybox. Shell classes
+		(hud-screen/hud-root/hud-card/hud-head/hud-foot/hidden/disabled) come from hud_shared;
+		everything prefixed sky- is this panel.
+
+		Pool sizes are fixed at author time because a CustomHud layout cannot create panels: 18 grid
+		cells (3 x 6), 5 brightness steps, 24 tint swatches. SkyboxPanel.cs holds the same numbers -
+		change one without the other and cells or steps silently go missing.
+
+		WHY 3 x 6. Skybox keys are long - cs_italy_s2_skybox_2_lightning is 30 characters - and a
+		four-column grid gives a 175px cell that ellipsizes them. Three columns give 236px, of which
+		206 is label, which is about 34 characters of Stratum2 Mono at 10px. 18 cells is also exactly
+		the stock config: 17 entries plus the injected Default, so a default server has one page and
+		no pager at all.
+
+		CONTRACT (SkyboxPanel.cs must match exactly)
+		  RootPanelId   = "SkyboxRoot"     unique server-wide; dialog vars are keyed by panel id
+		  RevealClass   = "show"
+		  CloseButtonId = "sky_close"
+		  RowCount      = 0                no row0..rowN pool here; every panel is addressed directly
+		  CaptureInput  = true             this one is clickable, it needs the mouse
+		  SharedText    = false            every viewer sees their own selection, brightness and tint
+
+		DIALOG VARIABLES
+		  menu_title       header title                            (LayoutContract.TitleVar)
+		  menu_subtitle    header tag, right of the title          (LayoutContract.SubtitleVar)
+		  menu_page        pager readout, e.g. "PAGE 1 / 2"        (LayoutContract.PageVar)
+		  menu_footer      footer hint line
+		  tab_skybox_lbl / tab_brightness_lbl / tab_tint_lbl   tab captions
+		  sb_title         heading above the grid
+		  sb0 .. sb17      cell captions, one skybox name each
+		  sb_empty         empty-state text, shown with #sb_empty
+		  br_title         heading of the brightness block
+		  br_desc          one-line explanation under it
+		  br_value         current brightness readout, e.g. "1.0"
+		  br_reset_lbl     caption on the reset step
+		  tc_title         heading of the tint block
+		  tc_desc          one-line explanation under it
+		  tc_value         current tint readout, e.g. "GOLD" or "NONE"
+
+		  The four brightness step captions and the 24 colour names are LITERAL text, not variables:
+		  none of them is localisable (KnownColor.ToString() is English either way) and each one would
+		  otherwise cost an interned string for a word that never changes.
+
+		CLASSES THE SERVER TOGGLES
+		  SkyboxRoot                      show        reveal / dismiss
+		  SkyboxRoot                      has-pages   the pager only exists past one page
+		  tab_skybox/brightness/tint      active      which tab is being shown
+		  tab_bar                         at-0/1/2    slides the underline to the active tab
+		  view_skybox/brightness/tint     hidden      exactly one view is on screen
+		  sb_r0 .. sb_r5                  hidden      collapse a grid line the page does not fill
+		  sb0 .. sb17                     hidden      collapse an unused cell
+		  sb0 .. sb17                     selected    the skybox this player is wearing
+		  sb_empty                        hidden      off when the page has cells
+		  tc_white .. tc_tan              selected    the tint this player is wearing
+
+		  The swatch chips are NOT server-set: the server cannot send a colour. Each swatch carries a
+		  static tint-<name> class and skybox_hud.css paints the chip from it.
+
+		BUTTON IDS THE SERVER RECEIVES
+		  sky_close                       contract close
+		  nav_prev / nav_next             contract pager (arrive as PanelAction.Page)
+		  tab_skybox / tab_brightness / tab_tint     NOT registered as PanelHandle.Tabs - see
+		                                  SkyboxPanel.RenderTabs for why they arrive as Button
+		  sb0 .. sb17                     a grid cell; resolved through the session's cell map
+		  br_down2 br_down1 br_reset br_up1 br_up2
+		  tc_white .. tc_tan              a tint swatch; the id maps straight to a KnownColor
+	-->
+	<Panel class="hud-screen" hittest="false">
+		<Panel id="SkyboxRoot" class="hud-root hud-card accent-blue sky-root">
+
+			<Panel class="hud-head">
+				<Label class="hud-title" text="{s:menu_title}" />
+				<Label class="hud-tag" text="{s:menu_subtitle}" />
+				<Button id="sky_close" class="hud-exit">
+					<Label class="hud-x" text="&#x2715;" />
+				</Button>
+			</Panel>
+
+			<!--
+				Three tabs, all three always present - none is gated on a permission - so the
+				underline's travel is the tab index and nothing has to count visible tabs.
+			-->
+			<Panel class="sky-tabs">
+				<Button id="tab_skybox" class="sky-tab active">
+					<Label class="sky-tab-lbl" text="{s:tab_skybox_lbl}" />
+				</Button>
+				<Button id="tab_brightness" class="sky-tab">
+					<Label class="sky-tab-lbl" text="{s:tab_brightness_lbl}" />
+				</Button>
+				<Button id="tab_tint" class="sky-tab">
+					<Label class="sky-tab-lbl" text="{s:tab_tint_lbl}" />
+				</Button>
+				<Panel id="tab_bar" class="sky-tab-bar at-0" />
+			</Panel>
+
+			<Panel class="sky-body">
+				<Panel id="view_skybox" class="sky-view">
+					<Label class="sky-sub" text="{s:sb_title}" />
+					<Panel class="sky-grid">
+						<Panel id="sb_r0" class="sky-gridrow hidden">
+							<Button id="sb0" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb0}" />
+							</Button>
+							<Button id="sb1" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb1}" />
+							</Button>
+							<Button id="sb2" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb2}" />
+							</Button>
+						</Panel>
+						<Panel id="sb_r1" class="sky-gridrow hidden">
+							<Button id="sb3" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb3}" />
+							</Button>
+							<Button id="sb4" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb4}" />
+							</Button>
+							<Button id="sb5" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb5}" />
+							</Button>
+						</Panel>
+						<Panel id="sb_r2" class="sky-gridrow hidden">
+							<Button id="sb6" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb6}" />
+							</Button>
+							<Button id="sb7" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb7}" />
+							</Button>
+							<Button id="sb8" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb8}" />
+							</Button>
+						</Panel>
+						<Panel id="sb_r3" class="sky-gridrow hidden">
+							<Button id="sb9" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb9}" />
+							</Button>
+							<Button id="sb10" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb10}" />
+							</Button>
+							<Button id="sb11" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb11}" />
+							</Button>
+						</Panel>
+						<Panel id="sb_r4" class="sky-gridrow hidden">
+							<Button id="sb12" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb12}" />
+							</Button>
+							<Button id="sb13" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb13}" />
+							</Button>
+							<Button id="sb14" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb14}" />
+							</Button>
+						</Panel>
+						<Panel id="sb_r5" class="sky-gridrow hidden">
+							<Button id="sb15" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb15}" />
+							</Button>
+							<Button id="sb16" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb16}" />
+							</Button>
+							<Button id="sb17" class="sky-cell hidden">
+								<Panel class="sky-cell-dot" />
+								<Label class="sky-cell-lbl" text="{s:sb17}" />
+							</Button>
+						</Panel>
+						<Label id="sb_empty" class="sky-empty hidden" text="{s:sb_empty}" />
+					</Panel>
+
+					<!-- Inside the view, so it collapses with it - otherwise the SKYBOX tab's
+					     has-pages leaves dead arrows under BRIGHTNESS. -->
+					<Panel class="sky-pager">
+						<Button id="nav_prev" class="sky-pg"><Label class="sky-pg-lbl" text="&#x25C0;" /></Button>
+						<Label class="sky-pg-txt" text="{s:menu_page}" />
+						<Button id="nav_next" class="sky-pg"><Label class="sky-pg-lbl" text="&#x25B6;" /></Button>
+					</Panel>
+				</Panel>
+
+				<Panel id="view_brightness" class="sky-view hidden">
+					<Panel class="sky-block">
+						<Panel class="sky-block-head">
+							<Label class="sky-block-title" text="{s:br_title}" />
+							<Label class="sky-block-value" text="{s:br_value}" />
+						</Panel>
+						<Label class="sky-block-desc" text="{s:br_desc}" />
+						<Panel class="sky-steprow">
+							<Button id="br_down2" class="sky-step">
+								<Label class="sky-step-lbl" text="-- (- 0.5)" />
+							</Button>
+							<Button id="br_down1" class="sky-step">
+								<Label class="sky-step-lbl" text="- (- 0.1)" />
+							</Button>
+							<Button id="br_reset" class="sky-step">
+								<Label class="sky-step-lbl" text="{s:br_reset_lbl}" />
+							</Button>
+							<Button id="br_up1" class="sky-step">
+								<Label class="sky-step-lbl" text="+ (+ 0.1)" />
+							</Button>
+							<Button id="br_up2" class="sky-step">
+								<Label class="sky-step-lbl" text="++ (+ 0.5)" />
+							</Button>
+						</Panel>
+					</Panel>
+				</Panel>
+
+				<Panel id="view_tint" class="sky-view hidden">
+					<Panel class="sky-block">
+						<Panel class="sky-block-head">
+							<Label class="sky-block-title" text="{s:tc_title}" />
+							<Label class="sky-block-value" text="{s:tc_value}" />
+						</Panel>
+						<Label class="sky-block-desc" text="{s:tc_desc}" />
+						<Panel id="tc_r0" class="sky-swatchrow">
+							<Button id="tc_white" class="sky-swatch tint-white">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="white" />
+							</Button>
+							<Button id="tc_silver" class="sky-swatch tint-silver">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="silver" />
+							</Button>
+							<Button id="tc_gray" class="sky-swatch tint-gray">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="gray" />
+							</Button>
+							<Button id="tc_black" class="sky-swatch tint-black">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="black" />
+							</Button>
+							<Button id="tc_maroon" class="sky-swatch tint-maroon">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="maroon" />
+							</Button>
+							<Button id="tc_red" class="sky-swatch tint-red">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="red" />
+							</Button>
+						</Panel>
+						<Panel id="tc_r1" class="sky-swatchrow">
+							<Button id="tc_crimson" class="sky-swatch tint-crimson">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="crimson" />
+							</Button>
+							<Button id="tc_pink" class="sky-swatch tint-pink">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="pink" />
+							</Button>
+							<Button id="tc_magenta" class="sky-swatch tint-magenta">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="magenta" />
+							</Button>
+							<Button id="tc_purple" class="sky-swatch tint-purple">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="purple" />
+							</Button>
+							<Button id="tc_indigo" class="sky-swatch tint-indigo">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="indigo" />
+							</Button>
+							<Button id="tc_navy" class="sky-swatch tint-navy">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="navy" />
+							</Button>
+						</Panel>
+						<Panel id="tc_r2" class="sky-swatchrow">
+							<Button id="tc_blue" class="sky-swatch tint-blue">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="blue" />
+							</Button>
+							<Button id="tc_skyblue" class="sky-swatch tint-skyblue">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="skyblue" />
+							</Button>
+							<Button id="tc_cyan" class="sky-swatch tint-cyan">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="cyan" />
+							</Button>
+							<Button id="tc_teal" class="sky-swatch tint-teal">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="teal" />
+							</Button>
+							<Button id="tc_seagreen" class="sky-swatch tint-seagreen">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="seagreen" />
+							</Button>
+							<Button id="tc_green" class="sky-swatch tint-green">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="green" />
+							</Button>
+						</Panel>
+						<Panel id="tc_r3" class="sky-swatchrow">
+							<Button id="tc_lime" class="sky-swatch tint-lime">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="lime" />
+							</Button>
+							<Button id="tc_yellow" class="sky-swatch tint-yellow">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="yellow" />
+							</Button>
+							<Button id="tc_gold" class="sky-swatch tint-gold">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="gold" />
+							</Button>
+							<Button id="tc_orange" class="sky-swatch tint-orange">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="orange" />
+							</Button>
+							<Button id="tc_brown" class="sky-swatch tint-brown">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="brown" />
+							</Button>
+							<Button id="tc_tan" class="sky-swatch tint-tan">
+								<Panel class="sky-swatch-chip" />
+								<Label class="sky-swatch-lbl" text="tan" />
+							</Button>
+						</Panel>
+					</Panel>
+				</Panel>
+			</Panel>
+
+			<Panel class="hud-foot">
+				<Label class="hud-hint" text="{s:menu_footer}" />
+			</Panel>
+
+		</Panel>
+	</Panel>
+</root>

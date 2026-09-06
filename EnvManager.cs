@@ -26,9 +26,18 @@ public class EnvManager
     float brightness = instance.Service.GetPlayerBrightness(player);
     Color color = instance.Service.GetPlayerColor(player);
 
-    // A saved choice is only restored if the player still has the permission for it,
-    // so losing VIP puts them back on the map's own sky.
-    if (skybox != null && !Helper.CanUseSkybox(player, skybox)) skybox = null;
+    // A saved choice is only restored if the player still has the permission for THAT SKY, so
+    // losing VIP puts them back on the map's own sky.
+    //
+    // Deliberately not Helper.CanUseSkybox: that also demands Config.MenuPermission, the
+    // permission to OPEN the menu, and this runs one frame after player_connect_full - inside the
+    // window where CS2-SimpleAdmin has cleared its cached admins and not yet re-added them
+    // (ReloadAdminsEveryMapChange, an async DB round trip). Losing that race threw the saved
+    // skybox away for the whole map with no retry, which is the "it won't show my sky after a
+    // reconnect" report. Wearing a sky you already chose is not the same act as opening the menu
+    // to choose one, and the menu itself is still gated in SkyboxCommand.
+    if (skybox != null && !Helper.PlayerHasPermission(player, skybox.Permissions, skybox.PermissionsOr))
+      skybox = null;
 
     // The material can only be bound at spawn, so spawn straight into the right one.
     Helper.SpawnSkybox(player.Slot, CubemapFogPointedSkyName ?? "", skybox?.Material ?? DefaultMaterial);
